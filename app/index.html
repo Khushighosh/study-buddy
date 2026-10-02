@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Study Buddy</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  h1 { margin-bottom: 0; }
+  .sub { color: #666; margin-top: 0.2rem; }
+  .tabs button { padding: 0.5rem 1rem; margin-right: 0.3rem; cursor: pointer; }
+  .tabs button.active { background: #222; color: #fff; }
+  section { display: none; margin-top: 1rem; }
+  section.active { display: block; }
+  input[type=text] { width: 100%; padding: 0.6rem; box-sizing: border-box; }
+  button { padding: 0.5rem 1rem; margin-top: 0.5rem; cursor: pointer; }
+  .box { background: #f4f4f4; padding: 1rem; border-radius: 6px; margin-top: 1rem; white-space: pre-wrap; }
+  .opt { display: block; width: 100%; text-align: left; margin: 0.4rem 0; }
+  .right { background: #d4f5d4; } .wrong { background: #f7d4d4; }
+</style>
+</head>
+<body>
+<h1>Study Buddy</h1>
+<p class="sub">Answers come only from your notes, running fully on this laptop.</p>
+
+<div class="tabs">
+  <button id="t-ask" class="active" onclick="show('ask')">Ask</button>
+  <button id="t-quiz" onclick="show('quiz')">Quiz me</button>
+  <button id="t-stats" onclick="show('stats'); loadStats()">My progress</button>
+</div>
+
+<section id="ask" class="active">
+  <input type="text" id="q" placeholder="Ask something from your notes..." onkeydown="if(event.key==='Enter') ask()">
+  <button onclick="ask()">Ask</button>
+  <div class="box" id="answer" style="display:none"></div>
+</section>
+
+<section id="quiz">
+  <button onclick="newQuiz(false)">New question</button>
+  <button onclick="newQuiz(true)">Practice my weak topic</button>
+  <div id="quizbox"></div>
+</section>
+
+<section id="stats"><div class="box" id="statsbox">Loading...</div></section>
+
+<script>
+function show(name) {
+  for (const s of ['ask', 'quiz', 'stats']) {
+    document.getElementById(s).classList.toggle('active', s === name);
+    document.getElementById('t-' + s).classList.toggle('active', s === name);
+  }
+}
+
+async function ask() {
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  const box = document.getElementById('answer');
+  box.style.display = 'block';
+  box.textContent = 'Thinking...';
+  const r = await fetch('/api/ask', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({question: q})
+  });
+  box.textContent = (await r.json()).answer;
+}
+
+async function newQuiz(weak) {
+  const qb = document.getElementById('quizbox');
+  qb.innerHTML = '';
+  const loading = document.createElement('p');
+  loading.textContent = 'Generating a question...';
+  qb.appendChild(loading);
+
+  const data = await (await fetch('/api/quiz?weak=' + weak)).json();
+  qb.innerHTML = '';
+  if (data.error) { loading.textContent = data.error; qb.appendChild(loading); return; }
+
+  const title = document.createElement('h3');
+  title.textContent = data.question;
+  qb.appendChild(title);
+
+  const note = document.createElement('div');
+  note.className = 'box';
+  note.style.display = 'none';
+
+  data.options.forEach((opt, i) => {
+    const b = document.createElement('button');
+    b.className = 'opt';
+    b.textContent = 'ABCD'[i] + '. ' + opt;
+    b.onclick = async () => {
+      const correct = i === data.answer_index;
+      qb.querySelectorAll('.opt').forEach((x, j) => {
+        x.disabled = true;
+        if (j === data.answer_index) x.classList.add('right');
+      });
+      if (!correct) b.classList.add('wrong');
+      note.style.display = 'block';
+      note.textContent = (correct ? 'Correct! ' : 'Not quite. ') + data.explanation + '  [' + data.source + ']';
+      await fetch('/api/result', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({topic: data.topic, correct})
+      });
+    };
+    qb.appendChild(b);
+  });
+  qb.appendChild(note);
+}
+
+async function loadStats() {
+  const box = document.getElementById('statsbox');
+  const rows = await (await fetch('/api/stats')).json();
+  box.textContent = rows.length
+    ? rows.map(r => `${r.topic}: ${r.accuracy}% correct (${r.count} question${r.count > 1 ? 's' : ''})`).join('\n')
+    : 'No quiz history yet. Try a few questions first.';
+}
+</script>
+</body>
+</html>
